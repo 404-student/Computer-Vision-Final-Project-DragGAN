@@ -443,15 +443,17 @@ with gr.Blocks() as app:
         outputs=[global_state],
     )
 
+    # 核心代码
     def on_click_start(global_state, image):
-        p_in_pixels = []
-        t_in_pixels = []
+        p_in_pixels = []  # 起点坐标
+        t_in_pixels = []  # 目标点坐标
         valid_points = []
 
         # handle of start drag in mask editing mode
         global_state = preprocess_mask_info(global_state, image)
 
         # Prepare the points for the inference
+        # 没有控制点，可以忽略
         if len(global_state["points"]) == 0:
             # yield on_click_start_wo_points(global_state, image)
             image_raw = global_state['images']['image_raw']
@@ -521,6 +523,7 @@ with gr.Blocks() as app:
             print(f'    Source: {p_in_pixels}')
             print(f'    Target: {t_in_pixels}')
             step_idx = 0
+            # 核心循环，不按 stop 不会停
             while True:
                 if global_state["temporal_params"]["stop"]:
                     break

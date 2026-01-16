@@ -270,14 +270,14 @@ class Renderer:
         print('    Remain feat_refs and points0_pt')
 
     def _render_drag_impl(self, res,
-        points          = [],
-        targets         = [],
-        mask            = None,
-        lambda_mask     = 10,
+        points          = [],       # 当前控制点位置
+        targets         = [],       # 目标点位置
+        mask            = None,     # 掩码，0 为保护
+        lambda_mask     = 10,       # 掩码损失的权重
         reg             = 0,
-        feature_idx     = 5,
-        r1              = 3,
-        r2              = 12,
+        feature_idx     = 5,        # 默认第五层特征
+        r1              = 3,        # 控制点影响范围
+        r2              = 12,       # 控制点影响范围
         random_seed     = 0,
         noise_mode      = 'const',
         trunc_psi       = 0.7,
@@ -335,9 +335,9 @@ class Renderer:
                     right = min(point[1] + r + 1, w)
                     feat_patch = feat_resize[:,:,up:down,left:right]
                     L2 = torch.linalg.norm(feat_patch - self.feat_refs[j].reshape(1,-1,1,1), dim=1)
-                    _, idx = torch.min(L2.view(1,-1), -1)
+                    _, idx = torch.min(L2.view(1,-1), -1)  # idx 展成了一维
                     width = right - left
-                    point = [idx.item() // width + up, idx.item() % width + left]
+                    point = [idx.item() // width + up, idx.item() % width + left]  # 需要转回来
                     points[j] = point
 
             res.points = [[point[0], point[1]] for point in points]
