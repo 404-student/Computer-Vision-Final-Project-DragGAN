@@ -81,6 +81,14 @@ class Renderer:
             self._end_event     = torch.cuda.Event(enable_timing=True)
         self._disable_timing = disable_timing
         self._net_layers    = dict()    # {cache_key: [dnnlib.EasyDict, ...], ...}
+        try:
+            from .raft_tracker import RaftFeatureTracker
+            raft_model_path = './RAFT/models/raft-things.pth'
+            self.raft_tracker = RaftFeatureTracker(raft_model_path, self._device)
+            print("[Renderer] RAFT跟踪器初始化成功。")
+        except Exception as e:
+            print(f"[Renderer] RAFT跟踪器初始化失败: {e}")
+            self.raft_tracker = None
 
     def render(self, **args):
         if self._disable_timing:
@@ -326,6 +334,7 @@ class Renderer:
                 self.points0_pt = torch.Tensor(points).unsqueeze(0).to(self._device) # 1, N, 2
 
             # Point tracking with feature matching
+            """
             with torch.no_grad():
                 for j, point in enumerate(points):
                     r = round(r2 / 512 * h)
@@ -339,6 +348,42 @@ class Renderer:
                     width = right - left
                     point = [idx.item() // width + up, idx.item() % width + left]  # 需要转回来
                     points[j] = point
+            """
+            if hasattr(self, 'raft_tracker') and self.raft_tracker is not None:
+                try:
+                    points = self.raft_tracker.track(self.feat0_resize, feat_resize, points)
+                    print(f"[RAFT] 跟踪了 {len(points)} 个点")
+                except Exception as e:
+                    print(f"[RAFT] 跟踪失败，错误: {e}， 回退到原始方法")
+                    with torch.no_grad():
+                        for j, point in enumerate(points):
+                            r = round(r2 / 512 * h)
+                            up = max(point[0] - r, 0)
+                            down = min(point[0] + r + 1, h)
+                            left = max(point[1] - r, 0)
+                            right = min(point[1] + r + 1, w)
+                            feat_patch = feat_resize[:,:,up:down,left:right]
+                            L2 = torch.linalg.norm(feat_patch - self.feat_refs[j].reshape(1,-1,1,1), dim=1)
+                            _, idx = torch.min(L2.view(1,-1), -1)  # idx 展成了一维
+                            width = right - left
+                            point = [idx.item() // width + up, idx.item() % width + left]  # 需要转回来
+                            points[j] = point
+            else:
+                print("[RAFT] 跟踪器不可用，使用原始方法")
+                with torch.no_grad():
+                    for j, point in enumerate(points):
+                        r = round(r2 / 512 * h)
+                        up = max(point[0] - r, 0)
+                        down = min(point[0] + r + 1, h)
+                        left = max(point[1] - r, 0)
+                        right = min(point[1] + r + 1, w)
+                        feat_patch = feat_resize[:,:,up:down,left:right]
+                        L2 = torch.linalg.norm(feat_patch - self.feat_refs[j].reshape(1,-1,1,1), dim=1)
+                        _, idx = torch.min(L2.view(1,-1), -1)  # idx 展成了一维
+                        width = right - left
+                        point = [idx.item() // width + up, idx.item() % width + left]  # 需要转回来
+                        points[j] = point
+
 
             res.points = [[point[0], point[1]] for point in points]
 
