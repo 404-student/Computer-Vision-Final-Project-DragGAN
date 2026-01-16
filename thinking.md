@@ -12,12 +12,6 @@ install wget gnupg software-properties-common
 
 按照 README，下载预训练模型
 
-```
-python visualizer_drag_gradio.py
-```
-
-启动 Gradio Web UI
-
 bias_act_plugin, upfirdn2d_plugin：CUDA 12.1 自带的 nvcc 未与系统默认 GCC 版本对齐。直接修改对应 py 文件：`__init__` 默认返回 False
 
 安装旧版 Gradio：3.36.1

@@ -48,6 +48,7 @@ class RaftFeatureTracker:
         points (list): [y, x]
         returns: list: [y, x]
         """
+        max_step = 3.0
         image0 = self._feat_to_raft(feat0)
         image = self._feat_to_raft(feat)
 
@@ -61,17 +62,16 @@ class RaftFeatureTracker:
         # 更新点坐标
         new_points = []
         h, w = flow.shape[1], flow.shape[2]
-        flow_batched = flow.unsqueeze(0)
-        for p in points:
-            y_orig, x_orig = p[0], p[1]
-            y, x = int(round(y_orig)), int(round(x_orig))
-            if 0 <= y < h and 0 <= x < w:
-                dx = flow[0, y, x].item()
-                dy = flow[1, y, x].item()
-                new_y = y_orig + dy
-                new_x = x_orig + dx
-                new_points.append([new_y, new_x])
-            else:
-                print(f"[RaftTracker Warning] 点 ({y_orig}， {x_orig}) 超出特征图范围 ({h}， {w})。")
-                new_points.append([y_orig, x_orig])
+        for y, x in points:
+            iy = int(round(y))
+            ix = int(round(x))
+            iy = max(0, min(iy, h - 1))
+            ix = max(0, min(ix, w - 1))
+            dx = flow[0, iy, ix].item()
+            dy = flow[1, iy, ix].item()
+            dx = max(-max_step, min(max_step, dx))
+            dy = max(-max_step, min(max_step, dy))
+
+            new_points.append([y + dy, x + dx])
+
         return new_points
