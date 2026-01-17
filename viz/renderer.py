@@ -89,6 +89,8 @@ class Renderer:
         except Exception as e:
             print(f"[Renderer] RAFT跟踪器初始化失败: {e}")
             self.raft_tracker = None
+        self._feat_drag_start = None
+        self._feat_drag_end = None
 
     def render(self, **args):
         if self._disable_timing:
@@ -320,11 +322,24 @@ class Renderer:
 
         h, w = G.img_resolution, G.img_resolution
 
+        if is_drag and (reset or self._feat_drag_start is None):
+            self._feat_drag_start = F.interpolate(
+                feat[feature_idx].detach(),
+                [h, w],
+                mode='bilinear'
+            )
+
         if is_drag:
             X = torch.linspace(0, h, h)
             Y = torch.linspace(0, w, w)
             xx, yy = torch.meshgrid(X, Y)
             feat_resize = F.interpolate(feat[feature_idx], [h, w], mode='bilinear')
+            # 每次调用时，覆盖前一次
+            self._feat_drag_end = F.interpolate(
+                feat[feature_idx].detach(),
+                [h, w],
+                mode='bilinear'
+            )
             if self.feat_refs is None:
                 self.feat0_resize = F.interpolate(feat[feature_idx].detach(), [h, w], mode='bilinear')
                 self.feat_refs = []
@@ -337,13 +352,13 @@ class Renderer:
             if hasattr(self, 'raft_tracker') and self.raft_tracker is not None:
                 try:
                     raft_points = self.raft_tracker.track(self.feat0_resize, feat_resize, points)
-                    print(f"[RAFT] 跟踪了 {len(points)} 个点")
                 except Exception as e:
                     print(f"[RAFT] 跟踪失败，错误: {e}， 回退到原始方法")
                     raft_points = points
             else:
                 print("[RAFT] 跟踪器不可用，使用原始方法")
                 raft_points = points
+            # raft_points = points  # 加这一句，回退到原始方法
             with torch.no_grad():
                 for j, point in enumerate(raft_points):
                     py = int(round(point[0]))
@@ -406,5 +421,41 @@ class Renderer:
             img = Image.fromarray(img)
         res.image = img
         res.w = ws.detach().cpu().numpy()
+
+    def get_drag_features(self):
+        return self._feat_drag_start, self._feat_drag_end
+
+    @torch.no_grad()
+    def evaluate_drag_quality(
+        self,
+        feat_before,     # Drag 前特征
+        feat_after,      # Drag 后特征
+        control_points,  # [(y, x), ...] 原 start 点
+        target_points,   # [(y, x), ...] 目标点
+    ):
+        """
+        返回每个点的 tracking error
+        """
+        assert self.raft_tracker is not None, "RAFT tracker not initialized"
+
+        # 1. 用 RAFT 跟踪原控制点
+        tracked_points = self.raft_tracker.track(
+            feat_before,
+            feat_after,
+            control_points,
+        )
+
+        # 2. 计算与 target 的距离
+        errors = []
+        for (ty, tx), (y, x) in zip(target_points, tracked_points):
+            dist = ((ty - y) ** 2 + (tx - x) ** 2) ** 0.5
+            errors.append(dist)
+
+        return {
+            "tracked_points": tracked_points,
+            "errors": errors,
+            "mean_error": sum(errors) / len(errors) if errors else 0.0,
+            "max_error": max(errors) if errors else 0.0,
+        }
 
 #----------------------------------------------------------------------------

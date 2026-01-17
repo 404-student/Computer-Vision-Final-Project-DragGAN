@@ -13,6 +13,8 @@ from gradio_utils import (ImageMask, draw_mask_on_image, draw_points_on_image,
                           get_latest_points_pair, get_valid_mask,
                           on_change_single_global_state)
 from viz.renderer import Renderer, add_watermark_np
+import copy
+import random
 
 parser = ArgumentParser()
 parser.add_argument('--share', action='store_true',default='True')
@@ -57,6 +59,69 @@ def clear_state(global_state, target=None):
 
     return global_state
 
+def compute_gradient_magnitude(image_pil):
+    """
+    image_pil: PIL.Image
+    return: grad_mag [H, W] float32
+    """
+    img = np.array(image_pil)
+
+    if img.ndim == 3:
+        gray = ( 0.299 * img[..., 0] + 0.587 * img[..., 1] + 0.114 * img[..., 2] )
+    else:
+        gray = img
+
+    gray = gray.astype(np.float32) / 255.0
+    gx = np.zeros_like(gray)
+    gy = np.zeros_like(gray)
+    gx[:, 1:-1] = (gray[:, 2:] - gray[:, :-2]) * 0.5
+    gy[1:-1, :] = (gray[2:, :] - gray[:-2, :]) * 0.5
+    grad_mag = np.sqrt(gx * gx + gy * gy)
+    return grad_mag
+
+def auto_add_low_texture_points(
+    image_pil,
+    points_dict,
+    num_points=1,
+    grad_thresh=0.02,
+    radius=60,
+):
+    """
+    image_pil: PIL.Image
+    points_dict: state['points']
+    """
+    grad = compute_gradient_magnitude(image_pil)
+    H, W = grad.shape
+
+    added = 0
+    tries = 0
+
+    while added < num_points and tries < 5000:
+        tries += 1
+        x = random.randint(0, W - 1)
+        y = random.randint(0, H - 1)
+        if grad[y, x] > grad_thresh:
+            continue
+
+        for _ in range(20):
+            dx = random.randint(-radius, radius)
+            dy = random.randint(-radius, radius)
+            tx = x + dx
+            ty = y + dy
+
+            if 0 <= tx < W and 0 <= ty < H:
+                break
+        else:
+            continue
+        next_idx = max(points_dict.keys(), default=-1) + 1
+        points_dict[next_idx] = {
+            'start': (x, y),
+            'target': (tx, ty),
+        }
+        print("start:(", x,",", y,")")
+        print("target:(", tx,",", ty,")")
+
+        added += 1
 
 def init_images(global_state):
     """This function is called only ones with Gradio App is started.
@@ -96,6 +161,27 @@ def init_images(global_state):
         add_watermark_np(np.array(init_image)))
     state['mask'] = np.ones((init_image.size[1], init_image.size[0]),
                             dtype=np.uint8)
+
+    # 开局随机采样低纹理点，并选定对应目标点
+    if 'points' not in state or state['points'] is None:
+        state['points'] = {}
+
+    auto_add_low_texture_points(
+        image_pil=init_image,
+        points_dict=state['points'],
+        num_points=state['params'].get('auto_point_num', 1),
+        grad_thresh=state['params'].get('grad_thresh', 0.02),
+        radius=state['params'].get('target_radius', 60),
+    )
+    image_draw = update_image_draw(
+        state['images']['image_raw'],
+        state['points'],
+        state['mask'],
+        state['show_mask'],
+        state,
+    )
+
+    state['images']['image_show'] = image_draw
     return global_state
 
 
@@ -354,8 +440,8 @@ with gr.Blocks() as app:
         """
 
         global_state['pretrained_weight'] = pretrained_value
-        init_images(global_state)
         clear_state(global_state)
+        init_images(global_state)
 
         return global_state, global_state["images"]['image_show']
 
@@ -371,8 +457,8 @@ with gr.Blocks() as app:
         2. Clear all states
         """
 
-        init_images(global_state)
         clear_state(global_state)
+        init_images(global_state)
 
         return global_state, global_state['images']['image_show']
 
@@ -390,8 +476,8 @@ with gr.Blocks() as app:
         """
 
         global_state["params"]["seed"] = int(seed)
-        init_images(global_state)
         clear_state(global_state)
+        init_images(global_state)
 
         return global_state, global_state['images']['image_show']
 
@@ -409,8 +495,8 @@ with gr.Blocks() as app:
         """
 
         global_state['params']['latent_space'] = latent_space
-        init_images(global_state)
         clear_state(global_state)
+        init_images(global_state)
 
         return global_state, global_state['images']['image_show']
 
@@ -524,9 +610,14 @@ with gr.Blocks() as app:
             print(f'    Target: {t_in_pixels}')
             step_idx = 0
             # 核心循环，不按 stop 不会停
+            stop_times = 0
+            all_start_points = copy.deepcopy(p_to_opt)
             while True:
                 if global_state["temporal_params"]["stop"]:
                     break
+
+                # 记住原来的点 p_to_opt 的位置
+                tmp = copy.deepcopy(p_to_opt)
 
                 # do drage here!
                 renderer._render_drag_impl(
@@ -607,6 +698,21 @@ with gr.Blocks() as app:
 
                 # increate step
                 step_idx += 1
+
+                # 如果控制点不移动了，黄牌警告
+                if tmp == p_to_opt: stop_times += 1
+                else: stop_times = 0
+                if stop_times >= 50:
+                    feat_before, feat_after = renderer.get_drag_features()
+                    result = renderer.evaluate_drag_quality(
+                        feat_before=feat_before,
+                        feat_after=feat_after,
+                        control_points=all_start_points,
+                        target_points=t_to_opt,
+                    )
+                    print("Mean tracking error:", result["mean_error"])
+                    print("Per-point error:", result["errors"])
+                    break
 
             image_result = global_state['generator_params']['image']
             global_state['images']['image_raw'] = image_result
