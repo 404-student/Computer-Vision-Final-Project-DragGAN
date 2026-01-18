@@ -1,7 +1,5 @@
 Ubantu
 
-sudo apt update, sudo apt upgrade -y
-
 install wget gnupg software-properties-common
 
 获取官方 CUDA 仓库，安装 12.1 的 cuda-Toolkit，因为官方给定 11.1 已经过时，会导致 compute_89 编译失败，bias_act 报错
@@ -11,10 +9,6 @@ install wget gnupg software-properties-common
 克隆 DragGAN 仓库，手动安装 yml 文件中的各种依赖，因为要避免安装错误的 PyTorch
 
 按照 README，下载预训练模型
-
-bias_act_plugin, upfirdn2d_plugin：CUDA 12.1 自带的 nvcc 未与系统默认 GCC 版本对齐。直接修改对应 py 文件：`__init__` 默认返回 False
-
-安装旧版 Gradio：3.36.1
 
 启动流程：
 
@@ -33,8 +27,6 @@ Ctrl + C
 exit
 ```
 
-获取原作者更新：`git fetch upstream, git merge upstream/main`
-
 拉取我的仓库的最新代码：
 ```
 git pull
@@ -43,11 +35,7 @@ git commit -m "wtf"
 git push
 ```
 
-latex 相关：在 [Texlive](https://tug.org/texlive/)，选 on DVD，在最下方 download，点第一个 CTAN mirror，选 202x.iso
-
 开始探索！
-
-当前进度：Code Understanding
 
 visualizer_drag_gradio.py：
 
@@ -72,15 +60,22 @@ _render_drag_impl：重中之重！点跟踪：320，运动监督：348
 
 成功接入 RAFT！但效果怎么比较？
 
-统计数据：
+统计数据：python clean_experiments.py
 
-Mean tracking error: 38.118237105091836
-Mean tracking error: 26.832815729997478
+牛逼：
+MD mean:  40.9625 ± 17.6523
+FID mean: 8.6247 ± 2.3920
 
-Mean tracking error: 46.010868281309364
-Mean tracking error: 43.86732111857041
+垃圾：
+MD mean:  55.4715 ± 11.8702
+FID mean: 11.2046 ± 2.1118
 
-[217, 392] [149, 411]
+新版：
 
-Mean tracking error: 70.31687856711352
-Mean tracking error: 79.58188507567081
+牛逼：
+MD mean:  43.8391 ± 15.8977
+FID mean: 10.1203 ± 4.1792
+
+垃圾：
+MD mean:  53.2572 ± 11.5562
+FID mean: 12.3427 ± 5.5768

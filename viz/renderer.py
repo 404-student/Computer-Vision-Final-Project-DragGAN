@@ -22,6 +22,10 @@ import dnnlib
 from torch_utils.ops import upfirdn2d
 import legacy # pylint: disable=import-error
 
+from torchvision.models import inception_v3
+import os
+import json
+
 #----------------------------------------------------------------------------
 
 class CapturedException(Exception):
@@ -65,6 +69,21 @@ def add_watermark_np(input_image_array, watermark_text="AI Generated"):
     watermarked_array = np.array(watermarked)
     return watermarked_array
 
+def tensor_to_pil(img: torch.Tensor):
+    """
+    img: torch.Tensor [1, 3, H, W], range [-1, 1]
+    return: PIL.Image.Image
+    """
+    assert isinstance(img, torch.Tensor)
+    assert img.ndim == 4 and img.shape[1] == 3
+
+    img = img[0]
+    img = (img * 127.5 + 128).clamp(0, 255)
+    img = img.to(torch.uint8).permute(1, 2, 0)
+
+    from PIL import Image
+    return Image.fromarray(img.cpu().numpy())
+
 #----------------------------------------------------------------------------
 
 class Renderer:
@@ -91,6 +110,16 @@ class Renderer:
             self.raft_tracker = None
         self._feat_drag_start = None
         self._feat_drag_end = None
+        self._drag_start_image = None
+        self._last_image = None
+        self.inception = inception_v3(
+            pretrained=True,
+            transform_input=False
+        ).eval().to(self._device)
+        for p in self.inception.parameters():
+            p.requires_grad = False
+        self.loss = []
+        
 
     def render(self, **args):
         if self._disable_timing:
@@ -314,11 +343,15 @@ class Renderer:
         if reset:
             self.feat_refs = None
             self.points0_pt = None
+            self._feat_drag_start = None
+            self._drag_start_image = None
+            self.loss = []
         self.points = points
 
         # Run synthesis network.
         label = torch.zeros([1, G.c_dim], device=self._device)
         img, feat = G(ws, label, truncation_psi=trunc_psi, noise_mode=noise_mode, input_is_w=True, return_feature=True)
+        self._last_image = img.detach()
 
         h, w = G.img_resolution, G.img_resolution
 
@@ -328,6 +361,8 @@ class Renderer:
                 [h, w],
                 mode='bilinear'
             )
+        if is_drag and self._drag_start_image is None:
+            self._drag_start_image = img.detach()
 
         if is_drag:
             X = torch.linspace(0, h, h)
@@ -404,6 +439,7 @@ class Renderer:
                     loss += lambda_mask * loss_fix
 
             loss += reg * F.l1_loss(ws, self.w0)  # latent code regularization
+            self.loss.append(loss.item())
             if not res.stop:
                 self.w_optim.zero_grad()
                 loss.backward()
@@ -457,5 +493,46 @@ class Renderer:
             "mean_error": sum(errors) / len(errors) if errors else 0.0,
             "max_error": max(errors) if errors else 0.0,
         }
+
+    def _extract_inception_feat(self, img):
+        """
+        img: torch.Tensor [1, 3, H, W], range [-1, 1]
+        return: [1, 2048]
+        """
+        img = (img + 1) / 2
+        img = F.interpolate(img, size=299, mode='bilinear', align_corners=False)
+        feat = self.inception(img)
+        return feat
+    
+    @torch.no_grad()
+    def compute_pseudo_fid(self):
+        assert self._drag_start_image is not None
+        assert self._last_image is not None
+        f0 = self._extract_inception_feat(self._drag_start_image)
+        f1 = self._extract_inception_feat(self._last_image)
+        return torch.norm(f0 - f1, p=2).item()
+
+    def get_loss(self):
+        return self.loss
+    def save_experiment(
+        self,
+        exp_dir,
+        losses,
+        metrics,
+        meta,
+    ):
+        os.makedirs(exp_dir, exist_ok=True)
+        #from PIL import Image
+        #tensor_to_pil(self._drag_start_image).save(
+        #    os.path.join(exp_dir, "image_before.png")
+        #)
+        #tensor_to_pil(self._last_image).save(
+        #    os.path.join(exp_dir, "image_after.png")
+        #)
+        np.save(os.path.join(exp_dir, "losses.npy"), np.array(losses))
+        with open(os.path.join(exp_dir, "metrics.json"), "w") as f:
+            json.dump(metrics, f, indent=2)
+        with open(os.path.join(exp_dir, "meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
 
 #----------------------------------------------------------------------------

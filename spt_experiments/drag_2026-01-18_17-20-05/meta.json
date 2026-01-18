@@ -1,0 +1,19 @@
+{
+  "r1": 3,
+  "r2": 6,
+  "lambda_mask": 20,
+  "trunc_psi": 0.7,
+  "feature_idx": 5,
+  "start_points": [
+    [
+      396,
+      240
+    ]
+  ],
+  "target_points": [
+    [
+      423,
+      225
+    ]
+  ]
+}

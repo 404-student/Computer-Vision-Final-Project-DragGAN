@@ -15,6 +15,7 @@ from gradio_utils import (ImageMask, draw_mask_on_image, draw_points_on_image,
 from viz.renderer import Renderer, add_watermark_np
 import copy
 import random
+import time
 
 parser = ArgumentParser()
 parser.add_argument('--share', action='store_true',default='True')
@@ -163,6 +164,7 @@ def init_images(global_state):
                             dtype=np.uint8)
 
     # 开局随机采样低纹理点，并选定对应目标点
+    """
     if 'points' not in state or state['points'] is None:
         state['points'] = {}
 
@@ -182,6 +184,7 @@ def init_images(global_state):
     )
 
     state['images']['image_show'] = image_draw
+    """
     return global_state
 
 
@@ -270,7 +273,7 @@ with gr.Blocks() as app:
             "seed": 0,
             "motion_lambda": 20,
             "r1_in_pixels": 3,
-            "r2_in_pixels": 12,
+            "r2_in_pixels": 6,
             "magnitude_direction_in_pixels": 1.0,
             "latent_space": "w+",
             "trunc_psi": 0.7,
@@ -700,6 +703,7 @@ with gr.Blocks() as app:
                 step_idx += 1
 
                 # 如果控制点不移动了，黄牌警告
+                """
                 if tmp == p_to_opt: stop_times += 1
                 else: stop_times = 0
                 if stop_times >= 50:
@@ -710,9 +714,30 @@ with gr.Blocks() as app:
                         control_points=all_start_points,
                         target_points=t_to_opt,
                     )
-                    print("Mean tracking error:", result["mean_error"])
-                    print("Per-point error:", result["errors"])
+                    pseudo_fid = renderer.compute_pseudo_fid()
+                    losses = renderer.get_loss()
+                    exp_dir = f"experiments/drag_{time.strftime('%Y-%m-%d_%H-%M-%S')}"
+                    renderer.save_experiment(
+                        exp_dir=exp_dir,
+                        losses=losses,
+                        metrics={
+                            "mean_tracking_error": result["mean_error"],
+                            "max_tracking_error": result["max_error"],
+                            "pseudo_fid": pseudo_fid,
+                            "num_steps": len(losses),
+                        },
+                        meta={
+                            "r1": global_state['params']['r1_in_pixels'],
+                            "r2": global_state['params']['r2_in_pixels'],
+                            "lambda_mask": global_state['params']['motion_lambda'],
+                            "trunc_psi": global_state['params']['trunc_psi'],
+                            "feature_idx": 5,
+                            "start_points": all_start_points,
+                            "target_points": t_to_opt,
+                        }
+                    )
                     break
+                """
 
             image_result = global_state['generator_params']['image']
             global_state['images']['image_raw'] = image_result
